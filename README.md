@@ -4,7 +4,7 @@ CoALoseControl muestra un aviso visual cuando tu personaje recibe control de per
 
 ## Instalación
 1. Copia la carpeta `CoALoseControl` en la ruta de addons de tu cliente de CoA Ascension:
-   - Windows: `Documents\World of Warcraft\_classic_\Interface\AddOns\CoALoseControl`
+   - Windows: `Ascension/Launcher/resources/ascension-live/Interface/AddOns`
    - Ajusta la ruta según tu instalación si tu cliente está en otra carpeta.
 2. Reinicia el juego o usa `/reload` dentro del juego.
 
