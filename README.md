@@ -1,42 +1,98 @@
-# CoALoseControl para CoA Ascension
+# CoALoseControl
 
-CoALoseControl muestra un aviso visual cuando tu personaje recibe control de personaje (CC). También aprende automáticamente nuevos IDs de CC a partir de los auras que detecta.
+CoALoseControl es un addon para Conquest of Azeroth (Ascension) que muestra alertas visuales cuando tu personaje queda afectado por efectos de control de masas (CC) como stuns, fears, silences, roots y otros efectos similares.
+
+Además, incluye un sistema de aprendizaje automático capaz de detectar y guardar nuevos CC que encuentre durante el juego, ayudando a mantener la base de datos actualizada incluso cuando se añaden nuevas habilidades al servidor.
+
+## Características
+
+* Alertas visuales cuando recibes un efecto de control.
+* Detección automática de nuevos CC.
+* Base de datos integrada con efectos conocidos.
+* Gestión sencilla mediante comandos.
+* Configuración desde el menú de interfaz.
+* Botón opcional en el minimapa para acceso rápido.
+* Configuración y datos guardados entre sesiones.
 
 ## Instalación
-1. Copia la carpeta `CoALoseControl` en la ruta de addons de tu cliente de CoA Ascension:
-   - Windows: `Ascension/Launcher/resources/ascension-live/Interface/AddOns`
-   - Ajusta la ruta según tu instalación si tu cliente está en otra carpeta.
-2. Reinicia el juego o usa `/reload` dentro del juego.
 
-## Uso
-### Panel de opciones
-- Abre la interfaz de AddOns en el juego (`Esc > Interface > AddOns > CoALoseControl`).
-- Activa o desactiva:
-  - Autoaprendizaje de CC
-  - Permitir aprendizaje
-  - Mostrar alertas de CC
-  - Mostrar icono en minimapa
-- Usa el botón del minimapa para abrir el panel de opciones directamente.
+1. Descarga el addon.
+2. Extrae la carpeta **CoALoseControl** dentro de:
 
-### Comandos
-- `/lc 12345` añade un ID manualmente.
-- `/lc list` muestra los CC conocidos y los aprendidos.
-- `/lc reset` reinicia la base de datos aprendida.
-- `/lc learn` activa o desactiva el aprendizaje automático.
-- `/lc options` abre el panel de opciones.
+```text
+Ascension/Launcher/resources/ascension-live/Interface/AddOns/
+```
 
-## Qué hace
-- Detecta auras del jugador y revisa los `spellId` de buffs/debuffs.
-- Usa una base predefinida de CC (`CoALoseControlData.lua`).
-- Aprende nuevos IDs de CC basados en nombres de efectos que parecen controles.
-- Guarda los datos aprendidos en `LoseControlDB`.
+3. Verifica que la estructura final sea:
+
+```text
+AddOns/
+└── CoALoseControl/
+    ├── CoALoseControl.toc
+    ├── LoseControl.lua
+    └── CoALoseControlData.lua
+```
+
+4. Inicia el juego o utiliza `/reload`.
+
+## Configuración
+
+Abre el panel desde:
+
+```text
+Esc → Interface → AddOns → CoALoseControl
+```
+
+Opciones disponibles:
+
+* Activar o desactivar el aprendizaje automático.
+* Permitir que se registren nuevos CC.
+* Mostrar u ocultar alertas visuales.
+* Mostrar u ocultar el icono del minimapa.
+
+También puedes acceder rápidamente mediante el botón del minimapa si está habilitado.
+
+## Comandos
+
+| Comando       | Descripción                                                   |
+| ------------- | ------------------------------------------------------------- |
+| `/lc options` | Abre el panel de configuración.                               |
+| `/lc list`    | Muestra los CC conocidos y aprendidos.                        |
+| `/lc learn`   | Activa o desactiva el aprendizaje automático.                 |
+| `/lc reset`   | Borra los CC aprendidos y reinicia la base de datos dinámica. |
+| `/lc 12345`   | Añade manualmente un Spell ID a la base de datos.             |
+
+## Cómo funciona
+
+El addon monitoriza los buffs y debuffs aplicados al jugador y compara sus Spell IDs con una base de datos de efectos de control conocidos.
+
+Cuando el aprendizaje automático está activado, CoALoseControl también analiza nuevas habilidades detectadas y puede registrarlas automáticamente para futuras sesiones.
+
+Los datos aprendidos se almacenan localmente en la configuración guardada del personaje.
 
 ## Archivos principales
-- `CoALoseControl.toc` — manifiesto del addon.
-- `LoseControl.lua` — lógica principal, detección, aprendizaje y UI.
-- `CoALoseControlData.lua` — base de datos de IDs de CC.
 
-## Notas
-- Si el addon no aparece en la lista, asegúrate de que la carpeta se llame exactamente `CoALoseControl` y que contenga `CoALoseControl.toc`.
-- Si cambias la posición del icono del minimapa, se guarda automáticamente en la configuración.
-- El addon es compatible con el cliente de Ascension que usa `## Interface: 30300`.
+* **CoALoseControl.toc** — Información y carga del addon.
+* **LoseControl.lua** — Lógica principal, interfaz y detección de CC.
+* **CoALoseControlData.lua** — Base de datos de controles conocidos.
+
+## Solución de problemas
+
+**El addon no aparece en el juego**
+
+* Comprueba que la carpeta se llame exactamente `CoALoseControl`.
+* Verifica que `CoALoseControl.toc` esté dentro de esa carpeta.
+
+**Las alertas no aparecen**
+
+* Revisa que la opción de alertas esté activada en la configuración.
+* Ejecuta `/reload` tras instalar o actualizar el addon.
+
+**He movido el icono del minimapa**
+
+* Su posición se guarda automáticamente y se restaurará al volver a iniciar sesión.
+
+## Compatibilidad
+
+Desarrollado para Conquest of Azeroth (Ascension) utilizando la interfaz compatible con `30300`.
+
