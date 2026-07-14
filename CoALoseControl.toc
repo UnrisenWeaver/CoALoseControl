@@ -1,0 +1,9 @@
+## Interface: 30300
+## Title: CoALoseControl
+## Notes: Muestra El tiempo restante de CC en tu personaje
+## Author: Punks
+## Version: 1.1.0
+## SavedVariables: LoseControlDB
+
+CoALoseControlData.lua
+LoseControl.lua
