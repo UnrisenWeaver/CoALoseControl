@@ -49,9 +49,18 @@ function addon:SetupDB()
         LoseControlDB.alertLocked = false
     end
 
+    if LoseControlDB.alertWidth == nil then
+        LoseControlDB.alertWidth = 300
+    end
+
+    if LoseControlDB.alertHeight == nil then
+        LoseControlDB.alertHeight = 60
+    end
+
     self.db = LoseControlDB
 end
 
+-- Normaliza el nombre del spell a minúsculas para comparaciones
 local function NormalizeName(name)
     if not name then
         return ""
@@ -59,6 +68,50 @@ local function NormalizeName(name)
     return string.lower(name)
 end
 
+-- Detecta el tipo de CC basado en el nombre del spell (Stun, Fear, Silence, etc.)
+local function GetCCType(name)
+    if not name then
+        return "CC"
+    end
+    local n = NormalizeName(name)
+
+    local types = {
+        { "stun", "Stun" },
+        { "silence", "Silence" },
+        { "root", "Root" },
+        { "fear", "Fear" },
+        { "sleep", "Sleep" },
+        { "charm", "Charm" },
+        { "polymorph", "Polymorph" },
+        { "freeze", "Freeze" },
+        { "sap", "Sap" },
+        { "banish", "Banish" },
+        { "repentance", "Repentance" },
+        { "cyclone", "Cyclone" },
+        { "hex", "Hex" },
+        { "scatter", "Scatter" },
+        { "incapacitate", "Incapacitate" },
+        { "immobil", "Immobilize" },
+        { "intimidat", "Intimidate" },
+        { "horror", "Horror" },
+        { "disorient", "Disorient" },
+        { "seduc", "Seduce" },
+        { "trap", "Trap" },
+        { "confus", "Confuse" },
+        { "shackle", "Shackle" },
+        { "morph", "Morph" }
+    }
+
+    for _, typeInfo in ipairs(types) do
+        if string.find(n, typeInfo[1], 1, true) then
+            return typeInfo[2]
+        end
+    end
+
+    return "CC"
+end
+
+-- Determina si un nombre de spell parece ser un CC basado en palabras clave
 local function IsLikelyCCName(name)
     local n = NormalizeName(name)
     if n == "" then
@@ -81,29 +134,34 @@ local function IsLikelyCCName(name)
     return false
 end
 
+-- Obtiene la lista de auras (debuffs y buffs) de una unidad con su duración
 local function GetAuraList(unit)
     local auras = {}
     local index = 1
 
+    -- Recorrer todos los debuffs
     while true do
-        local name, _, _, _, _, _, _, _, _, spellId = UnitDebuff(unit, index)
+        local name, _, _, _, _, expirationTime, _, _, _, spellId = UnitDebuff(unit, index)
         if not name then
             break
         end
         if spellId then
-            auras[spellId] = { name = name, kind = "debuff" }
+            local duration = expirationTime and expirationTime - GetTime() or nil
+            auras[spellId] = { name = name, kind = "debuff", duration = duration, expirationTime = expirationTime }
         end
         index = index + 1
     end
 
+    -- Recorrer todos los buffs (solo si no están ya en debuffs)
     index = 1
     while true do
-        local name, _, _, _, _, _, _, _, _, spellId = UnitBuff(unit, index)
+        local name, _, _, _, _, expirationTime, _, _, _, spellId = UnitBuff(unit, index)
         if not name then
             break
         end
         if spellId and not auras[spellId] then
-            auras[spellId] = { name = name, kind = "buff" }
+            local duration = expirationTime and expirationTime - GetTime() or nil
+            auras[spellId] = { name = name, kind = "buff", duration = duration, expirationTime = expirationTime }
         end
         index = index + 1
     end
@@ -111,10 +169,13 @@ local function GetAuraList(unit)
     return auras
 end
 
+-- Inicializa el sistema de aprendizaje de CC
 function addon:SetupLearning()
     self:SetupDB()
 end
 
+-- Obtiene la etiqueta/label para un spell ID específico
+-- Busca en: CC base -> CC personalizados -> CC aprendidos -> nombre del aura
 function addon:GetLabelForSpell(spellId, auraName)
     if self.ccSpells[spellId] then
         return self.ccSpells[spellId]
@@ -135,6 +196,8 @@ function addon:GetLabelForSpell(spellId, auraName)
     return nil
 end
 
+-- Verifica si un spell es conocido como CC
+-- Retorna true si está en CC base, personalizados, aprendidos o parece ser CC por el nombre
 function addon:IsKnownCCSpell(spellId, auraName)
     if self.ccSpells[spellId] or self.customSpellIds[spellId] then
         return true
@@ -151,6 +214,7 @@ function addon:IsKnownCCSpell(spellId, auraName)
     return false
 end
 
+-- Aprende automáticamente CCs de las auras activas si el autoaprendizaje está activado
 function addon:LearnFromAuras(auras)
     if not self.db or not self.db.learnCC or not self.db.autoLearn then
         return
@@ -172,10 +236,12 @@ function addon:LearnFromAuras(auras)
     end
 end
 
+-- Busca un CC activo en la lista de auras
+-- Retorna: label, spellId, duración del CC encontrado
 function addon:FindActiveCC(auras)
     for spellId, auraData in pairs(auras) do
         if self:IsKnownCCSpell(spellId, auraData and auraData.name) then
-            return self:GetLabelForSpell(spellId, auraData and auraData.name), spellId
+            return self:GetLabelForSpell(spellId, auraData and auraData.name), spellId, auraData and auraData.duration
         end
     end
 
@@ -184,7 +250,7 @@ end
 
 local function CreateAlertFrame()
     local frame = CreateFrame("Frame", "LoseControlAlertFrame", UIParent)
-    frame:SetSize(430, 90)
+    frame:SetSize(300, 60)
     frame:SetPoint("CENTER", 0, 220)
     frame:SetFrameStrata("DIALOG")
     frame:Hide()
@@ -201,6 +267,27 @@ local function CreateAlertFrame()
     frame:SetBackdropBorderColor(1, 0.2, 0.2, 1)
     frame:SetMovable(true)
     frame:RegisterForDrag("LeftButton")
+    frame:SetResizable(true)
+
+    -- Handle de redimensionamiento en la esquina inferior derecha
+    local resizeHandle = CreateFrame("Button", nil, frame)
+    resizeHandle:SetSize(16, 16)
+    resizeHandle:SetPoint("BOTTOMRIGHT", 0, 0)
+    resizeHandle:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    resizeHandle:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    resizeHandle:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    resizeHandle:Show()
+
+    resizeHandle:SetScript("OnMouseDown", function(self)
+        frame:StartSizing("BOTTOMRIGHT")
+    end)
+
+    resizeHandle:SetScript("OnMouseUp", function(self)
+        frame:StopMovingOrSizing()
+        -- Guardar el tamaño en la base de datos
+        LoseControlDB.alertWidth = frame:GetWidth()
+        LoseControlDB.alertHeight = frame:GetHeight()
+    end)
 
     frame:SetScript("OnDragStart", function(self)
         if not self.db or not self.db.alertLocked then
@@ -219,10 +306,22 @@ local function CreateAlertFrame()
         end
     end)
 
+    frame.icon = frame:CreateTexture(nil, "ARTWORK")
+    frame.icon:SetSize(40, 40)
+    frame.icon:SetPoint("LEFT", 15, 0)
+    frame.icon:SetTexture("Interface\\Icons\\Spell_Shadow_Charm")
+    frame.icon:Hide()
+
     frame.text = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    frame.text:SetPoint("CENTER", 0, 0)
+    frame.text:SetPoint("LEFT", 65, 0)
     frame.text:SetFont("Fonts\\FRIZQT__.TTF", 18, "OUTLINE")
     frame.text:SetTextColor(1, 0.85, 0.2, 1)
+
+    frame.timerText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    frame.timerText:SetPoint("RIGHT", -15, 0)
+    frame.timerText:SetFont("Fonts\\FRIZQT__.TTF", 14, "OUTLINE")
+    frame.timerText:SetTextColor(1, 1, 1, 1)
+    frame.timerText:Hide()
 
     -- Botón de bloqueo dentro del frame
     local lockButton = CreateFrame("Button", nil, frame)
@@ -259,6 +358,20 @@ local function CreateAlertFrame()
         if GetTime() >= self.showUntil then
             self:Hide()
             self.showUntil = nil
+            self.icon:Hide()
+            self.timerText:Hide()
+            self.duration = nil
+            self.startTime = nil
+        end
+
+        -- Actualizar timer si hay duración
+        if self.duration and self.startTime then
+            local remaining = self.duration - (GetTime() - self.startTime)
+            if remaining > 0 then
+                self.timerText:SetText(string.format("%.1fs", remaining))
+            else
+                self.timerText:SetText("0.0s")
+            end
         end
     end)
 
@@ -284,15 +397,39 @@ function addon:ApplyAlertFramePosition()
 
     self.frame:ClearAllPoints()
     self.frame:SetPoint(point, UIParent, relativePoint, xOfs, yOfs)
+
+    -- Aplicar tamaño guardado
+    local width = self.db and self.db.alertWidth or 300
+    local height = self.db and self.db.alertHeight or 60
+    self.frame:SetSize(width, height)
 end
 
-function addon:ShowAlert(label)
+function addon:ShowAlert(label, duration, iconTexture)
     if self.db and not self.db.showAlerts then
         return
     end
 
-    self.frame.text:SetText("CC DETECTADO\n" .. label)
+    local ccType = GetCCType(label)
+    self.frame.text:SetText(ccType .. ": " .. label)
     self.frame:Show()
+
+    if iconTexture then
+        self.frame.icon:SetTexture(iconTexture)
+        self.frame.icon:Show()
+    else
+        self.frame.icon:Hide()
+    end
+
+    if duration then
+        self.frame.duration = duration
+        self.frame.startTime = GetTime()
+        self.frame.timerText:Show()
+    else
+        self.frame.duration = nil
+        self.frame.startTime = nil
+        self.frame.timerText:Hide()
+    end
+
     self.frame.showUntil = nil -- Mantener visible mientras el CC esté activo
     PlaySound(166)
 end
@@ -398,38 +535,46 @@ local function CreateOptionsPanel()
     subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
     subtitle:SetText("Opciones para el addon de detección y aprendizaje de CC.")
 
-    local autoLearnCheckbox = CreateFrame("CheckButton", "LoseControlAutoLearnCheck", panel, "InterfaceOptionsCheckButtonTemplate")
-    autoLearnCheckbox:SetPoint("TOPLEFT", subtitle, "BOTTOMLEFT", 0, -24)
-    _G[autoLearnCheckbox:GetName() .. "Text"]:SetText("Autoaprendizaje de CC")
-    autoLearnCheckbox:SetScript("OnClick", function(self)
-        LoseControlDB.autoLearn = self:GetChecked()
+    local autoLearnButton = CreateFrame("Button", "LoseControlAutoLearnButton", panel, "UIPanelButtonTemplate")
+    autoLearnButton:SetSize(180, 24)
+    autoLearnButton:SetPoint("TOPLEFT", subtitle, "BOTTOMLEFT", 0, -24)
+    autoLearnButton:SetText("Autoaprendizaje: " .. (LoseControlDB.autoLearn and "ON" or "OFF"))
+    autoLearnButton:SetScript("OnClick", function(self)
+        LoseControlDB.autoLearn = not LoseControlDB.autoLearn
+        self:SetText("Autoaprendizaje: " .. (LoseControlDB.autoLearn and "ON" or "OFF"))
     end)
 
-    local learnCheckbox = CreateFrame("CheckButton", "LoseControlLearnCheck", panel, "InterfaceOptionsCheckButtonTemplate")
-    learnCheckbox:SetPoint("TOPLEFT", autoLearnCheckbox, "BOTTOMLEFT", 0, -10)
-    _G[learnCheckbox:GetName() .. "Text"]:SetText("Permitir aprendizaje")
-    learnCheckbox:SetScript("OnClick", function(self)
-        LoseControlDB.learnCC = self:GetChecked()
+    local learnButton = CreateFrame("Button", "LoseControlLearnButton", panel, "UIPanelButtonTemplate")
+    learnButton:SetSize(180, 24)
+    learnButton:SetPoint("TOPLEFT", autoLearnButton, "BOTTOMLEFT", 0, -10)
+    learnButton:SetText("Aprendizaje: " .. (LoseControlDB.learnCC and "ON" or "OFF"))
+    learnButton:SetScript("OnClick", function(self)
+        LoseControlDB.learnCC = not LoseControlDB.learnCC
+        self:SetText("Aprendizaje: " .. (LoseControlDB.learnCC and "ON" or "OFF"))
     end)
 
-    local showAlertsCheckbox = CreateFrame("CheckButton", "LoseControlShowAlertsCheck", panel, "InterfaceOptionsCheckButtonTemplate")
-    showAlertsCheckbox:SetPoint("TOPLEFT", learnCheckbox, "BOTTOMLEFT", 0, -10)
-    _G[showAlertsCheckbox:GetName() .. "Text"]:SetText("Mostrar alertas de CC")
-    showAlertsCheckbox:SetScript("OnClick", function(self)
-        LoseControlDB.showAlerts = self:GetChecked()
+    local showAlertsButton = CreateFrame("Button", "LoseControlShowAlertsButton", panel, "UIPanelButtonTemplate")
+    showAlertsButton:SetSize(180, 24)
+    showAlertsButton:SetPoint("TOPLEFT", learnButton, "BOTTOMLEFT", 0, -10)
+    showAlertsButton:SetText("Alertas: " .. (LoseControlDB.showAlerts and "ON" or "OFF"))
+    showAlertsButton:SetScript("OnClick", function(self)
+        LoseControlDB.showAlerts = not LoseControlDB.showAlerts
+        self:SetText("Alertas: " .. (LoseControlDB.showAlerts and "ON" or "OFF"))
     end)
 
-    local minimapCheckbox = CreateFrame("CheckButton", "LoseControlMinimapCheck", panel, "InterfaceOptionsCheckButtonTemplate")
-    minimapCheckbox:SetPoint("TOPLEFT", showAlertsCheckbox, "BOTTOMLEFT", 0, -10)
-    _G[minimapCheckbox:GetName() .. "Text"]:SetText("Mostrar icono en minimapa")
-    minimapCheckbox:SetScript("OnClick", function(self)
-        LoseControlDB.showMinimap = self:GetChecked()
+    local minimapButton = CreateFrame("Button", "LoseControlMinimapButton", panel, "UIPanelButtonTemplate")
+    minimapButton:SetSize(180, 24)
+    minimapButton:SetPoint("TOPLEFT", showAlertsButton, "BOTTOMLEFT", 0, -10)
+    minimapButton:SetText("Minimapa: " .. (LoseControlDB.showMinimap and "ON" or "OFF"))
+    minimapButton:SetScript("OnClick", function(self)
+        LoseControlDB.showMinimap = not LoseControlDB.showMinimap
+        self:SetText("Minimapa: " .. (LoseControlDB.showMinimap and "ON" or "OFF"))
         addon:UpdateMinimapButton()
     end)
 
     local moveAlertButton = CreateFrame("Button", "LoseControlMoveAlertButton", panel, "UIPanelButtonTemplate")
     moveAlertButton:SetSize(180, 24)
-    moveAlertButton:SetPoint("TOPLEFT", minimapCheckbox, "BOTTOMLEFT", -2, -14)
+    moveAlertButton:SetPoint("TOPLEFT", minimapButton, "BOTTOMLEFT", 0, -14)
     moveAlertButton:SetText("Mover alerta de CC")
     moveAlertButton:SetScript("OnClick", function()
         -- Desbloquear automáticamente al mostrar
@@ -447,11 +592,19 @@ local function CreateOptionsPanel()
         print("LoseControl: arrastra la alerta para moverla, usa el botón de bloqueo para guardar posición")
     end)
 
+    local viewCCButton = CreateFrame("Button", "LoseControlViewCCButton", panel, "UIPanelButtonTemplate")
+    viewCCButton:SetSize(180, 24)
+    viewCCButton:SetPoint("TOPLEFT", moveAlertButton, "BOTTOMLEFT", 0, -14)
+    viewCCButton:SetText("Demostración de CC")
+    viewCCButton:SetScript("OnClick", function()
+        addon:ShowDemoAlert()
+    end)
+
     panel.refresh = function(self)
-        autoLearnCheckbox:SetChecked(LoseControlDB.autoLearn)
-        learnCheckbox:SetChecked(LoseControlDB.learnCC)
-        showAlertsCheckbox:SetChecked(LoseControlDB.showAlerts)
-        minimapCheckbox:SetChecked(LoseControlDB.showMinimap)
+        autoLearnButton:SetText("Autoaprendizaje: " .. (LoseControlDB.autoLearn and "ON" or "OFF"))
+        learnButton:SetText("Aprendizaje: " .. (LoseControlDB.learnCC and "ON" or "OFF"))
+        showAlertsButton:SetText("Alertas: " .. (LoseControlDB.showAlerts and "ON" or "OFF"))
+        minimapButton:SetText("Minimapa: " .. (LoseControlDB.showMinimap and "ON" or "OFF"))
     end
 
     InterfaceOptions_AddCategory(panel)
@@ -466,14 +619,21 @@ function addon:OpenOptionsPanel()
     InterfaceOptionsFrame_OpenToCategory(self.optionsPanel)
 end
 
+-- Función principal de refresh: verifica auras, aprende CCs y muestra alertas
 function addon:Refresh()
     self:SetupLearning()
     local auras = GetAuraList("player")
     self:LearnFromAuras(auras)
 
-    local label = self:FindActiveCC(auras)
+    local label, spellId, duration = self:FindActiveCC(auras)
     if label then
-        self:ShowAlert(label)
+        -- Obtener el icono del spell si es posible
+        local iconTexture = nil
+        if spellId then
+            local _, _, icon = GetSpellInfo(spellId)
+            iconTexture = icon
+        end
+        self:ShowAlert(label, duration, iconTexture)
     else
         self.frame:Hide()
     end
@@ -489,6 +649,26 @@ function addon:ListKnownCC()
     for spellId, label in pairs(self.db and self.db.learnedSpells or {}) do
         print("- " .. spellId .. " = " .. label)
     end
+end
+
+-- Muestra una demostración de cómo funciona el addon
+-- Simula un CC de Polymorph por 5 segundos en la posición configurada
+function addon:ShowDemoAlert()
+    -- Simular un CC de demostración
+    local demoDuration = 5.0 -- 5 segundos
+    local demoLabel = "Polymorph"
+    local demoIcon = "Interface\\Icons\\Spell_Nature_Polymorph"
+
+    -- Aplicar la posición configurada por el usuario
+    self:ApplyAlertFramePosition()
+
+    -- Mostrar la alerta con icono y duración
+    self:ShowAlert(demoLabel, demoDuration, demoIcon)
+
+    -- Configurar para que se oculte después de la duración
+    self.frame.showUntil = GetTime() + demoDuration
+
+    print("LoseControl: demostración iniciada - duración " .. demoDuration .. " segundos")
 end
 
 local eventFrame = CreateFrame("Frame")
