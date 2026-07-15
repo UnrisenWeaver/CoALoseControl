@@ -1,5 +1,5 @@
 local addonName, addon = ...
-addon.version = "1.1.0"
+addon.version = "1.1.1" 
 
 addon.ccSpells = addon.ccSpells or {}
 addon.customSpellIds = addon.customSpellIds or {}
@@ -135,19 +135,29 @@ local function IsLikelyCCName(name)
 end
 
 -- Obtiene la lista de auras (debuffs y buffs) de una unidad con su duración
+-- CORREGIDO: Parámetros exactos de UnitDebuff/UnitBuff para WoW 3.3.5a
 local function GetAuraList(unit)
     local auras = {}
     local index = 1
 
     -- Recorrer todos los debuffs
     while true do
-        local name, _, _, _, _, expirationTime, _, _, _, spellId = UnitDebuff(unit, index)
+        -- name, rank, icon, count, debuffType, duration, expirationTime, unitCaster, isStealable, shouldConsolidate, spellId
+        local name, _, _, _, _, _, expirationTime, _, _, _, spellId = UnitDebuff(unit, index)
         if not name then
             break
         end
-        if spellId then
-            local duration = expirationTime and expirationTime - GetTime() or nil
-            auras[spellId] = { name = name, kind = "debuff", duration = duration, expirationTime = expirationTime }
+        if spellId and spellId > 0 then
+            local remainingDuration = nil
+            if expirationTime and expirationTime > 0 then
+                remainingDuration = math.max(0, expirationTime - GetTime())
+            end
+            auras[spellId] = { 
+                name = name, 
+                kind = "debuff", 
+                duration = remainingDuration, 
+                expirationTime = expirationTime 
+            }
         end
         index = index + 1
     end
@@ -155,23 +165,27 @@ local function GetAuraList(unit)
     -- Recorrer todos los buffs (solo si no están ya en debuffs)
     index = 1
     while true do
-        local name, _, _, _, _, expirationTime, _, _, _, spellId = UnitBuff(unit, index)
+        -- name, rank, icon, count, debuffType, duration, expirationTime, unitCaster, isStealable, shouldConsolidate, spellId
+        local name, _, _, _, _, _, expirationTime, _, _, _, spellId = UnitBuff(unit, index)
         if not name then
             break
         end
-        if spellId and not auras[spellId] then
-            local duration = expirationTime and expirationTime - GetTime() or nil
-            auras[spellId] = { name = name, kind = "buff", duration = duration, expirationTime = expirationTime }
+        if spellId and spellId > 0 and not auras[spellId] then
+            local remainingDuration = nil
+            if expirationTime and expirationTime > 0 then
+                remainingDuration = math.max(0, expirationTime - GetTime())
+            end
+            auras[spellId] = { 
+                name = name, 
+                kind = "buff", 
+                duration = remainingDuration, 
+                expirationTime = expirationTime 
+            }
         end
         index = index + 1
     end
 
     return auras
-end
-
--- Inicializa el sistema de aprendizaje de CC
-function addon:SetupLearning()
-    self:SetupDB()
 end
 
 -- Obtiene la etiqueta/label para un spell ID específico
@@ -285,12 +299,14 @@ local function CreateAlertFrame()
     resizeHandle:SetScript("OnMouseUp", function(self)
         frame:StopMovingOrSizing()
         -- Guardar el tamaño en la base de datos
-        LoseControlDB.alertWidth = frame:GetWidth()
-        LoseControlDB.alertHeight = frame:GetHeight()
+        if addon.db then
+            addon.db.alertWidth = frame:GetWidth()
+            addon.db.alertHeight = frame:GetHeight()
+        end
     end)
 
     frame:SetScript("OnDragStart", function(self)
-        if not self.db or not self.db.alertLocked then
+        if not (addon.db and addon.db.alertLocked) then
             self:StartMoving()
         end
     end)
@@ -298,11 +314,11 @@ local function CreateAlertFrame()
     frame:SetScript("OnDragStop", function(self)
         self:StopMovingOrSizing()
         local point, _, relativePoint, xOfs, yOfs = self:GetPoint()
-        if type(point) == "string" then
-            LoseControlDB.alertPoint = point
-            LoseControlDB.alertRelativePoint = relativePoint or point
-            LoseControlDB.alertX = xOfs or 0
-            LoseControlDB.alertY = yOfs or 0
+        if type(point) == "string" and addon.db then
+            addon.db.alertPoint = point
+            addon.db.alertRelativePoint = relativePoint or point
+            addon.db.alertX = xOfs or 0
+            addon.db.alertY = yOfs or 0
         end
     end)
 
@@ -333,7 +349,9 @@ local function CreateAlertFrame()
     lockButton:Hide()
 
     lockButton:SetScript("OnClick", function(self)
-        LoseControlDB.alertLocked = true
+        if addon.db then
+            addon.db.alertLocked = true
+        end
         frame:Hide()
         print("LoseControl: alerta bloqueada")
     end)
@@ -409,6 +427,10 @@ function addon:ShowAlert(label, duration, iconTexture)
         return
     end
 
+    if not self.frame then
+        return
+    end
+
     local ccType = GetCCType(label)
     self.frame.text:SetText(ccType .. ": " .. label)
     self.frame:Show()
@@ -431,12 +453,20 @@ function addon:ShowAlert(label, duration, iconTexture)
     end
 
     self.frame.showUntil = nil -- Mantener visible mientras el CC esté activo
-    PlaySound(166)
+    
+    local success = pcall(function()
+        PlaySound(166)
+    end)
+    if not success then
+        pcall(function()
+            PlaySoundFile("Interface\\AddOns\\CoALoseControl\\Sounds\\alert.ogg", "Master")
+        end)
+    end
 end
 
 function addon:UpdateMinimapButton()
     local function updatePosition(button)
-        local angle = math.rad(button.db.minimapPos or 225)
+        local angle = math.rad(button.db and button.db.minimapPos or 225)
         local radius = Minimap:GetWidth() / 2 + 4
         local x = math.cos(angle) * radius
         local y = math.sin(angle) * radius
@@ -450,7 +480,9 @@ function addon:UpdateMinimapButton()
         local scale = Minimap:GetEffectiveScale()
         px, py = px / scale, py / scale
 
-        self.db.minimapPos = math.deg(math.atan2(py - my, px - mx)) % 360
+        if self.db then
+            self.db.minimapPos = math.deg(math.atan2(py - my, px - mx)) % 360
+        end
         updatePosition(self)
     end
 
@@ -505,7 +537,7 @@ function addon:UpdateMinimapButton()
             GameTooltip:Hide()
         end)
 
-        button.db = LoseControlDB
+        button.db = addon.db
         self.minimapButton = button
     end
 
@@ -518,7 +550,9 @@ function addon:UpdateMinimapButton()
     if self.db and self.db.minimapPos then
         updatePosition(self.minimapButton)
     else
-        self.db.minimapPos = 225
+        if self.db then
+            self.db.minimapPos = 225
+        end
         updatePosition(self.minimapButton)
     end
 end
@@ -538,38 +572,46 @@ local function CreateOptionsPanel()
     local autoLearnButton = CreateFrame("Button", "LoseControlAutoLearnButton", panel, "UIPanelButtonTemplate")
     autoLearnButton:SetSize(180, 24)
     autoLearnButton:SetPoint("TOPLEFT", subtitle, "BOTTOMLEFT", 0, -24)
-    autoLearnButton:SetText("Autoaprendizaje: " .. (LoseControlDB.autoLearn and "ON" or "OFF"))
+    autoLearnButton:SetText("Autoaprendizaje: " .. (addon.db and addon.db.autoLearn and "ON" or "OFF"))
     autoLearnButton:SetScript("OnClick", function(self)
-        LoseControlDB.autoLearn = not LoseControlDB.autoLearn
-        self:SetText("Autoaprendizaje: " .. (LoseControlDB.autoLearn and "ON" or "OFF"))
+        if addon.db then
+            addon.db.autoLearn = not addon.db.autoLearn
+            self:SetText("Autoaprendizaje: " .. (addon.db.autoLearn and "ON" or "OFF"))
+        end
     end)
 
     local learnButton = CreateFrame("Button", "LoseControlLearnButton", panel, "UIPanelButtonTemplate")
     learnButton:SetSize(180, 24)
     learnButton:SetPoint("TOPLEFT", autoLearnButton, "BOTTOMLEFT", 0, -10)
-    learnButton:SetText("Aprendizaje: " .. (LoseControlDB.learnCC and "ON" or "OFF"))
+    learnButton:SetText("Aprendizaje: " .. (addon.db and addon.db.learnCC and "ON" or "OFF"))
     learnButton:SetScript("OnClick", function(self)
-        LoseControlDB.learnCC = not LoseControlDB.learnCC
-        self:SetText("Aprendizaje: " .. (LoseControlDB.learnCC and "ON" or "OFF"))
+        if addon.db then
+            addon.db.learnCC = not addon.db.learnCC
+            self:SetText("Aprendizaje: " .. (addon.db.learnCC and "ON" or "OFF"))
+        end
     end)
 
     local showAlertsButton = CreateFrame("Button", "LoseControlShowAlertsButton", panel, "UIPanelButtonTemplate")
     showAlertsButton:SetSize(180, 24)
     showAlertsButton:SetPoint("TOPLEFT", learnButton, "BOTTOMLEFT", 0, -10)
-    showAlertsButton:SetText("Alertas: " .. (LoseControlDB.showAlerts and "ON" or "OFF"))
+    showAlertsButton:SetText("Alertas: " .. (addon.db and addon.db.showAlerts and "ON" or "OFF"))
     showAlertsButton:SetScript("OnClick", function(self)
-        LoseControlDB.showAlerts = not LoseControlDB.showAlerts
-        self:SetText("Alertas: " .. (LoseControlDB.showAlerts and "ON" or "OFF"))
+        if addon.db then
+            addon.db.showAlerts = not addon.db.showAlerts
+            self:SetText("Alertas: " .. (addon.db.showAlerts and "ON" or "OFF"))
+        end
     end)
 
     local minimapButton = CreateFrame("Button", "LoseControlMinimapButton", panel, "UIPanelButtonTemplate")
     minimapButton:SetSize(180, 24)
     minimapButton:SetPoint("TOPLEFT", showAlertsButton, "BOTTOMLEFT", 0, -10)
-    minimapButton:SetText("Minimapa: " .. (LoseControlDB.showMinimap and "ON" or "OFF"))
+    minimapButton:SetText("Minimapa: " .. (addon.db and addon.db.showMinimap and "ON" or "OFF"))
     minimapButton:SetScript("OnClick", function(self)
-        LoseControlDB.showMinimap = not LoseControlDB.showMinimap
-        self:SetText("Minimapa: " .. (LoseControlDB.showMinimap and "ON" or "OFF"))
-        addon:UpdateMinimapButton()
+        if addon.db then
+            addon.db.showMinimap = not addon.db.showMinimap
+            self:SetText("Minimapa: " .. (addon.db.showMinimap and "ON" or "OFF"))
+            addon:UpdateMinimapButton()
+        end
     end)
 
     local moveAlertButton = CreateFrame("Button", "LoseControlMoveAlertButton", panel, "UIPanelButtonTemplate")
@@ -577,17 +619,19 @@ local function CreateOptionsPanel()
     moveAlertButton:SetPoint("TOPLEFT", minimapButton, "BOTTOMLEFT", 0, -14)
     moveAlertButton:SetText("Mover alerta de CC")
     moveAlertButton:SetScript("OnClick", function()
-        -- Desbloquear automáticamente al mostrar
-        LoseControlDB.alertLocked = false
+        if addon.db then
+            addon.db.alertLocked = false
+        end
         addon:ApplyAlertFramePosition()
-        addon.frame.text:SetText("CC DETECTADO\n(MODO MOVIMIENTO)")
-        addon.frame:Show()
-        addon.frame.showUntil = nil -- Evitar que se oculte automáticamente
-        addon.frame:SetMovable(true)
-        addon.frame:EnableMouse(true)
-        -- Mostrar botón de bloqueo en modo movimiento
-        if addon.frame.lockButton then
-            addon.frame.lockButton:Show()
+        if addon.frame then
+            addon.frame.text:SetText("CC DETECTADO\n(MODO MOVIMIENTO)")
+            addon.frame:Show()
+            addon.frame.showUntil = nil
+            addon.frame:SetMovable(true)
+            addon.frame:EnableMouse(true)
+            if addon.frame.lockButton then
+                addon.frame.lockButton:Show()
+            end
         end
         print("LoseControl: arrastra la alerta para moverla, usa el botón de bloqueo para guardar posición")
     end)
@@ -601,10 +645,10 @@ local function CreateOptionsPanel()
     end)
 
     panel.refresh = function(self)
-        autoLearnButton:SetText("Autoaprendizaje: " .. (LoseControlDB.autoLearn and "ON" or "OFF"))
-        learnButton:SetText("Aprendizaje: " .. (LoseControlDB.learnCC and "ON" or "OFF"))
-        showAlertsButton:SetText("Alertas: " .. (LoseControlDB.showAlerts and "ON" or "OFF"))
-        minimapButton:SetText("Minimapa: " .. (LoseControlDB.showMinimap and "ON" or "OFF"))
+        autoLearnButton:SetText("Autoaprendizaje: " .. (addon.db and addon.db.autoLearn and "ON" or "OFF"))
+        learnButton:SetText("Aprendizaje: " .. (addon.db and addon.db.learnCC and "ON" or "OFF"))
+        showAlertsButton:SetText("Alertas: " .. (addon.db and addon.db.showAlerts and "ON" or "OFF"))
+        minimapButton:SetText("Minimapa: " .. (addon.db and addon.db.showMinimap and "ON" or "OFF"))
     end
 
     InterfaceOptions_AddCategory(panel)
@@ -616,26 +660,31 @@ function addon:OpenOptionsPanel()
         self.optionsPanel = CreateOptionsPanel()
     end
     InterfaceOptionsFrame_OpenToCategory(self.optionsPanel)
-    InterfaceOptionsFrame_OpenToCategory(self.optionsPanel)
 end
 
 -- Función principal de refresh: verifica auras, aprende CCs y muestra alertas
 function addon:Refresh()
-    self:SetupLearning()
+    if not self.db then
+        return -- Esperar a que la DB esté lista (ADDON_LOADED)
+    end
+    
     local auras = GetAuraList("player")
     self:LearnFromAuras(auras)
 
     local label, spellId, duration = self:FindActiveCC(auras)
     if label then
-        -- Obtener el icono del spell si es posible
         local iconTexture = nil
-        if spellId then
+        if spellId and spellId > 0 then
             local _, _, icon = GetSpellInfo(spellId)
-            iconTexture = icon
+            if icon then
+                iconTexture = icon
+            end
         end
         self:ShowAlert(label, duration, iconTexture)
     else
-        self.frame:Hide()
+        if self.frame then
+            self.frame:Hide()
+        end
     end
 end
 
@@ -652,33 +701,38 @@ function addon:ListKnownCC()
 end
 
 -- Muestra una demostración de cómo funciona el addon
--- Simula un CC de Polymorph por 5 segundos en la posición configurada
 function addon:ShowDemoAlert()
-    -- Simular un CC de demostración
+    if not self.frame then
+        return
+    end
+    
     local demoDuration = 5.0 -- 5 segundos
     local demoLabel = "Polymorph"
     local demoIcon = "Interface\\Icons\\Spell_Nature_Polymorph"
 
-    -- Aplicar la posición configurada por el usuario
     self:ApplyAlertFramePosition()
-
-    -- Mostrar la alerta con icono y duración
     self:ShowAlert(demoLabel, demoDuration, demoIcon)
-
-    -- Configurar para que se oculte después de la duración
     self.frame.showUntil = GetTime() + demoDuration
-
     print("LoseControl: demostración iniciada - duración " .. demoDuration .. " segundos")
 end
 
+-- CORREGIDO: Registro de eventos seguro
 local eventFrame = CreateFrame("Frame")
+eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterEvent("UNIT_AURA")
-eventFrame:SetScript("OnEvent", function(self, event, unit)
-    if event == "UNIT_AURA" and unit ~= "player" then
-        return
+
+eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
+    if event == "ADDON_LOADED" and arg1 == addonName then
+        addon:SetupLearning()
+        addon:InitializeAlertFrame()
+        addon:UpdateMinimapButton()
+        self:UnregisterEvent("ADDON_LOADED")
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        addon:Refresh()
+    elseif event == "UNIT_AURA" and arg1 == "player" then
+        addon:Refresh()
     end
-    addon:Refresh()
 end)
 
 SLASH_LOSECONTROL1 = "/losecontrol"
@@ -692,18 +746,22 @@ SlashCmdList["LOSECONTROL"] = function(msg)
     end
 
     if command == "reset" then
-        if type(LoseControlDB.learnedSpells) == "table" then
-            wipe(LoseControlDB.learnedSpells)
+        if addon.db and type(addon.db.learnedSpells) == "table" then
+            wipe(addon.db.learnedSpells)
         end
         print("LoseControl: base de CC reiniciada")
     elseif command == "list" then
         addon:ListKnownCC()
     elseif command == "learn" then
-        LoseControlDB.learnCC = not LoseControlDB.learnCC
-        print(("LoseControl: aprendizaje %s"):format(LoseControlDB.learnCC and "activado" or "desactivado"))
+        if addon.db then
+            addon.db.learnCC = not addon.db.learnCC
+            print(("LoseControl: aprendizaje %s"):format(addon.db.learnCC and "activado" or "desactivado"))
+        end
     elseif command == "auto" then
-        LoseControlDB.autoLearn = not LoseControlDB.autoLearn
-        print(("LoseControl: autoaprendizaje %s"):format(LoseControlDB.autoLearn and "activado" or "desactivado"))
+        if addon.db then
+            addon.db.autoLearn = not addon.db.autoLearn
+            print(("LoseControl: autoaprendizaje %s"):format(addon.db.autoLearn and "activado" or "desactivado"))
+        end
     elseif command == "options" or command == "opt" or command == "config" then
         addon:OpenOptionsPanel()
     elseif command ~= "" then
@@ -720,8 +778,3 @@ SlashCmdList["LOSECONTROL"] = function(msg)
         print("LoseControl: verificado")
     end
 end
-
-addon:InitializeAlertFrame()
-addon:SetupLearning()
-addon:UpdateMinimapButton()
-addon:Refresh()

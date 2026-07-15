@@ -1,8 +1,8 @@
 ## Interface: 30300
 ## Title: CoALoseControl
-## Notes: Muestra El tiempo restante de CC en tu personaje
+## Notes: Muestra un aviso visual cuando recibes control de personaje (CC) en CoA Ascension y aprende los IDs que detecta.
 ## Author: Punks
-## Version: 1.1.0
+## Version: 1.1.1
 ## SavedVariables: LoseControlDB
 
 CoALoseControlData.lua
