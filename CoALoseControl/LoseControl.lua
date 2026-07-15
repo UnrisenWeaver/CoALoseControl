@@ -724,7 +724,6 @@ eventFrame:RegisterEvent("UNIT_AURA")
 
 eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
     if event == "ADDON_LOADED" and arg1 == addonName then
-        addon:SetupLearning()
         addon:InitializeAlertFrame()
         addon:UpdateMinimapButton()
         self:UnregisterEvent("ADDON_LOADED")
