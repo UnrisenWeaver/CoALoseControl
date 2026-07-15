@@ -94,5 +94,5 @@ Los datos aprendidos se almacenan localmente en la configuración guardada del p
 
 ## Compatibilidad
 
-Desarrollado para Conquest of Azeroth (Ascension) utilizando la interfaz compatible con `30300`.
+Desarrollado para (Ascension) utilizando la interfaz compatible con `30300`.
 
